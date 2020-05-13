@@ -2,7 +2,8 @@ from django.contrib.auth import get_user_model
 import json
 from asgiref.sync import async_to_sync
 from channels.generic.websocket import WebsocketConsumer
-from .models import Message
+from .models import Message, Chat, Contact
+from .views import get_lastest, get_user_contact, get_current_chat
 
 
 User = get_user_model()
@@ -10,7 +11,7 @@ User = get_user_model()
 
 class ChatConsumer(WebsocketConsumer):
     def fetch_messages(self, data):
-        messages = Message.__lastmessages__()
+        messages = get_lastest(data['chatid'])
         content = {
             'message': self.messages_to_json(messages)
         }
@@ -19,15 +20,20 @@ class ChatConsumer(WebsocketConsumer):
     def new_message(self, data):
         author = data['from']
         author_user = User.objects.filter(username=author)[0]
-        message = Message.object.create(
+        message = Message.objects.create(
             author=author_user,
-            content=data['from']
+            content=data['message']
         )
-        content = {
-            'command': new_message,
-            'message': self.message_to_json(message)}
+        curr_chat = get_current_chat(data['chatid'])
+        curr_chat.messages.add(message)
+        curr_chat.save()
+        # message.save()
+        dict = {
+            'command': 'new_message',
+            'message': self.message_to_json(message)
+        }
 
-        return self.send_chat_message(content)
+        return self.send_chat_message(dict)
 
     def messages_to_json(self, messages):
         result = []
@@ -37,6 +43,7 @@ class ChatConsumer(WebsocketConsumer):
 
     def message_to_json(self, message):
         dict = {
+            'id': message.id,
             'author': message.author.username,
             'content': message.content,
             'timestamp': str(message.timestamp)
@@ -74,8 +81,6 @@ class ChatConsumer(WebsocketConsumer):
         self.commands[data['command']](self, data)
 
     def send_chat_message(self, message):
-        message = data['message']
-
         # Send message to room group
         async_to_sync(self.channel_layer.group_send)(
             self.room_group_name,
